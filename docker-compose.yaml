@@ -1,0 +1,40 @@
+services:
+  compliance-api:
+    build: ./services/compliance-api
+    ports:
+      - "8000:8000"
+
+  dashboard:
+    build: ./services/dashboard
+    ports:
+      - "3000:80"
+
+  payment-server:
+    build: ./services/payment-server
+    ports:
+      - "8081:8081"
+
+  web-server:
+    image: nginx:1.27-alpine
+    ports:
+      - "8080:80"
+
+  compliance-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: compliance
+      POSTGRES_USER: compliance
+      POSTGRES_PASSWORD: compliance_dev
+
+  payment-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: payments
+      POSTGRES_USER: payments
+      POSTGRES_PASSWORD: payments_dev
+
+  policy-engine:
+    image: openpolicyagent/opa:latest
+    command: ["run", "--server", "--addr=0.0.0.0:8181"]
+    ports:
+      - "8181:8181"
