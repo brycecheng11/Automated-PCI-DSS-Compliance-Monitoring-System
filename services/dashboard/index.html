@@ -1,0 +1,711 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>PCI DSS Retailer Monitor</title>
+
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            font-family: Arial, sans-serif;
+            background: #f4f7fb;
+            color: #172033;
+        }
+
+        header {
+            padding: 28px 6%;
+            background: #102a43;
+            color: white;
+        }
+
+        header h1 {
+            margin: 0 0 8px;
+        }
+
+        main {
+            max-width: 1250px;
+            margin: 25px auto;
+            padding: 0 20px;
+        }
+
+        .panel,
+        section,
+        .card {
+            background: white;
+            border-radius: 10px;
+            padding: 18px;
+            box-shadow: 0 2px 8px rgba(16, 42, 67, 0.12);
+        }
+
+        .panel {
+            display: grid;
+            grid-template-columns: 1fr 1fr auto;
+            gap: 12px;
+            align-items: end;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 6px;
+            color: #52606d;
+            font-size: 14px;
+        }
+
+        input,
+        select {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #bcccdc;
+            border-radius: 6px;
+            font-size: 14px;
+        }
+
+        button,
+        .report-button {
+            padding: 11px 16px;
+            border: none;
+            border-radius: 6px;
+            color: white;
+            cursor: pointer;
+            font-size: 15px;
+            text-decoration: none;
+            display: inline-block;
+        }
+
+        button {
+            background: #1769aa;
+        }
+
+        button:hover {
+            background: #0d4f82;
+        }
+
+        button:disabled {
+            background: #7d8b99;
+            cursor: not-allowed;
+        }
+
+        .report-button {
+            background: #52606d;
+        }
+
+        .toolbar {
+            display: flex;
+            gap: 12px;
+            align-items: end;
+            flex-wrap: wrap;
+            margin: 20px 0;
+        }
+
+        #message {
+            font-weight: bold;
+        }
+
+        .error {
+            color: #b42318;
+        }
+
+        .meta {
+            display: flex;
+            gap: 22px;
+            flex-wrap: wrap;
+            margin-top: 18px;
+            color: #52606d;
+        }
+
+        .meta strong {
+            color: #172033;
+        }
+
+        .cards {
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            gap: 14px;
+            margin-top: 20px;
+        }
+
+        .card-label {
+            color: #52606d;
+            font-size: 14px;
+        }
+
+        .card-value {
+            margin-top: 8px;
+            font-size: 28px;
+            font-weight: bold;
+        }
+
+        .pass {
+            color: #137333;
+        }
+
+        .fail {
+            color: #b42318;
+        }
+
+        .manual {
+            color: #9a6700;
+        }
+
+        section {
+            margin-top: 22px;
+            overflow-x: auto;
+        }
+
+        section h2 {
+            margin-top: 0;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            min-width: 750px;
+        }
+
+        th,
+        td {
+            padding: 11px;
+            border-bottom: 1px solid #e3e8ef;
+            text-align: left;
+            font-size: 14px;
+        }
+
+        th {
+            background: #f7f9fc;
+        }
+
+        @media (max-width: 950px) {
+            .panel {
+                grid-template-columns: 1fr;
+            }
+
+            .cards {
+                grid-template-columns: repeat(2, 1fr);
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <header>
+        <h1>PCI DSS 4.0.1 Retailer Compliance Monitor</h1>
+        <p>Continuous compliance monitoring for retailer payment environments</p>
+    </header>
+
+    <main>
+        <section class="panel">
+            <div>
+                <label for="retailerName">Add retailer</label>
+                <input
+                    id="retailerName"
+                    placeholder="Retailer name">
+            </div>
+
+            <div>
+                <label for="retailerEmail">Administrator email</label>
+                <input
+                    id="retailerEmail"
+                    placeholder="security@example.com">
+            </div>
+
+            <button onclick="addRetailer()">
+                Add Retailer
+            </button>
+        </section>
+
+        <div class="toolbar">
+            <div>
+                <label for="retailerSelect">
+                    Selected retailer
+                </label>
+
+                <select
+                    id="retailerSelect"
+                    onchange="selectRetailer()">
+                </select>
+            </div>
+
+            <button
+                id="scanButton"
+                onclick="runScan()">
+                Run Scan Now
+            </button>
+
+            <a
+                id="reportButton"
+                class="report-button"
+                href="#">
+                Download CSV Report
+            </a>
+
+            <span id="message">
+                Loading...
+            </span>
+        </div>
+
+        <div class="meta">
+            <span>
+                Retailer:
+                <strong id="retailerDisplay">—</strong>
+            </span>
+
+            <span>
+                Monitoring:
+                <strong id="monitoringStatus">—</strong>
+            </span>
+
+            <span>
+                Last scan:
+                <strong id="lastScan">—</strong>
+            </span>
+
+            <span>
+                Scan status:
+                <strong id="lastScanStatus">—</strong>
+            </span>
+        </div>
+
+        <div class="cards">
+            <div class="card">
+                <div class="card-label">Compliance Score</div>
+                <div class="card-value" id="score">—</div>
+            </div>
+
+            <div class="card">
+                <div class="card-label">Total Controls</div>
+                <div class="card-value" id="total">—</div>
+            </div>
+
+            <div class="card">
+                <div class="card-label">Passed</div>
+                <div class="card-value pass" id="passed">—</div>
+            </div>
+
+            <div class="card">
+                <div class="card-label">Failed</div>
+                <div class="card-value fail" id="failed">—</div>
+            </div>
+
+            <div class="card">
+                <div class="card-label">Manual Review</div>
+                <div class="card-value manual" id="manual">—</div>
+            </div>
+        </div>
+
+        <section>
+            <h2>Registered Assets</h2>
+
+            <table>
+                <thead>
+                    <tr>
+                        <th>Asset ID</th>
+                        <th>Name</th>
+                        <th>Type</th>
+                        <th>Owner</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+
+                <tbody id="assetsTable"></tbody>
+            </table>
+        </section>
+
+        <section>
+            <h2>PCI DSS Requirements</h2>
+
+            <table>
+                <thead>
+                    <tr>
+                        <th>Requirement</th>
+                        <th>Description</th>
+                        <th>Controls</th>
+                        <th>Passed</th>
+                        <th>Failed</th>
+                        <th>Manual Review</th>
+                    </tr>
+                </thead>
+
+                <tbody id="requirementsTable"></tbody>
+            </table>
+        </section>
+
+        <section>
+            <h2>Open Findings</h2>
+
+            <p>
+                Open findings:
+                <strong id="openFindings">—</strong>
+            </p>
+
+            <table>
+                <thead>
+                    <tr>
+                        <th>Control</th>
+                        <th>Asset</th>
+                        <th>Severity</th>
+                        <th>Status</th>
+                        <th>Description</th>
+                        <th>Owner</th>
+                    </tr>
+                </thead>
+
+                <tbody id="findingsTable"></tbody>
+            </table>
+        </section>
+    </main>
+
+    <script>
+        const API_URL = "http://localhost:8000";
+
+        let selectedRetailerId = null;
+
+        function escapeHtml(value) {
+            return String(value ?? "")
+                .replaceAll("&", "&amp;")
+                .replaceAll("<", "&lt;")
+                .replaceAll(">", "&gt;")
+                .replaceAll('"', "&quot;")
+                .replaceAll("'", "&#039;");
+        }
+
+        async function requestJson(endpoint, options = {}) {
+            const response = await fetch(
+                API_URL + endpoint,
+                options
+            );
+
+            if (!response.ok) {
+                throw new Error(
+                    endpoint +
+                    " returned HTTP " +
+                    response.status
+                );
+            }
+
+            return response.json();
+        }
+
+        function retailerQuery() {
+            return "?retailer_id=" +
+                encodeURIComponent(selectedRetailerId);
+        }
+
+        async function loadRetailers() {
+            const retailers =
+                await requestJson("/retailers");
+
+            const select =
+                document.getElementById("retailerSelect");
+
+            if (retailers.length === 0) {
+                select.innerHTML =
+                    "<option>No retailers registered</option>";
+
+                selectedRetailerId = null;
+                return;
+            }
+
+            if (
+                !selectedRetailerId ||
+                !retailers.some(
+                    retailer =>
+                        retailer.retailer_id === selectedRetailerId
+                )
+            ) {
+                selectedRetailerId =
+                    retailers[0].retailer_id;
+            }
+
+            select.innerHTML = retailers.map(
+                retailer => `
+                    <option value="${retailer.retailer_id}">
+                        ${escapeHtml(retailer.name)}
+                    </option>
+                `
+            ).join("");
+
+            select.value = selectedRetailerId;
+        }
+
+        async function loadDashboard() {
+            if (!selectedRetailerId) {
+                return;
+            }
+
+            const query = retailerQuery();
+
+            const [
+                summary,
+                requirements,
+                findings,
+                assets
+            ] = await Promise.all([
+                requestJson("/summary" + query),
+                requestJson("/requirements" + query),
+                requestJson("/findings" + query),
+                requestJson(
+                    "/retailers/" +
+                    selectedRetailerId +
+                    "/assets"
+                )
+            ]);
+
+            document.getElementById(
+                "retailerDisplay"
+            ).textContent = summary.retailer_name;
+
+            document.getElementById(
+                "monitoringStatus"
+            ).textContent = summary.monitoring_status;
+
+            document.getElementById(
+                "lastScanStatus"
+            ).textContent = summary.last_scan_status;
+
+            document.getElementById(
+                "lastScan"
+            ).textContent = summary.last_scan_completed
+                ? new Date(
+                    summary.last_scan_completed
+                ).toLocaleString()
+                : "Not run";
+
+            document.getElementById("score").textContent =
+                summary.score + "%";
+
+            document.getElementById("total").textContent =
+                summary.total;
+
+            document.getElementById("passed").textContent =
+                summary.passed;
+
+            document.getElementById("failed").textContent =
+                summary.failed;
+
+            document.getElementById("manual").textContent =
+                summary.manual_review;
+
+            document.getElementById(
+                "openFindings"
+            ).textContent = summary.open_findings;
+
+            document.getElementById(
+                "reportButton"
+            ).href =
+                API_URL +
+                "/report.csv" +
+                query;
+
+            document.getElementById(
+                "assetsTable"
+            ).innerHTML = assets.map(
+                asset => `
+                    <tr>
+                        <td>${escapeHtml(asset.asset_id)}</td>
+                        <td>${escapeHtml(asset.name)}</td>
+                        <td>${escapeHtml(asset.asset_type)}</td>
+                        <td>${escapeHtml(asset.owner)}</td>
+                        <td>${escapeHtml(asset.status)}</td>
+                    </tr>
+                `
+            ).join("");
+
+            document.getElementById(
+                "requirementsTable"
+            ).innerHTML = requirements.map(
+                requirement => `
+                    <tr>
+                        <td>${requirement.number}</td>
+                        <td>${escapeHtml(requirement.title)}</td>
+                        <td>${requirement.control_count}</td>
+                        <td class="pass">
+                            ${requirement.passed}
+                        </td>
+                        <td class="fail">
+                            ${requirement.failed}
+                        </td>
+                        <td class="manual">
+                            ${requirement.manual_review}
+                        </td>
+                    </tr>
+                `
+            ).join("");
+
+            document.getElementById(
+                "findingsTable"
+            ).innerHTML = findings.length
+                ? findings.map(
+                    finding => `
+                        <tr>
+                            <td>${escapeHtml(finding.control_id)}</td>
+                            <td>${escapeHtml(finding.asset_id)}</td>
+                            <td>${escapeHtml(finding.severity)}</td>
+                            <td>${escapeHtml(finding.status)}</td>
+                            <td>${escapeHtml(finding.description)}</td>
+                            <td>${escapeHtml(finding.owner)}</td>
+                        </tr>
+                    `
+                ).join("")
+                : `
+                    <tr>
+                        <td colspan="6">No open findings</td>
+                    </tr>
+                `;
+        }
+
+        async function addRetailer() {
+            const name =
+                document.getElementById(
+                    "retailerName"
+                ).value.trim();
+
+            const adminEmail =
+                document.getElementById(
+                    "retailerEmail"
+                ).value.trim();
+
+            if (!name || !adminEmail) {
+                showError(
+                    new Error(
+                        "Enter a retailer name and email."
+                    )
+                );
+
+                return;
+            }
+
+            try {
+                const created =
+                    await requestJson(
+                        "/retailers",
+                        {
+                            method: "POST",
+                            headers: {
+                                "Content-Type":
+                                    "application/json"
+                            },
+                            body: JSON.stringify({
+                                name: name,
+                                admin_email: adminEmail
+                            })
+                        }
+                    );
+
+                selectedRetailerId =
+                    created.retailer_id;
+
+                document.getElementById(
+                    "retailerName"
+                ).value = "";
+
+                document.getElementById(
+                    "retailerEmail"
+                ).value = "";
+
+                await loadRetailers();
+                await loadDashboard();
+
+                document.getElementById(
+                    "message"
+                ).textContent =
+                    "Retailer added successfully.";
+            } catch (error) {
+                showError(error);
+            }
+        }
+
+        async function selectRetailer() {
+            selectedRetailerId =
+                document.getElementById(
+                    "retailerSelect"
+                ).value;
+
+            try {
+                await loadDashboard();
+
+                document.getElementById(
+                    "message"
+                ).textContent =
+                    "Retailer loaded.";
+            } catch (error) {
+                showError(error);
+            }
+        }
+
+        async function runScan() {
+            if (!selectedRetailerId) {
+                return;
+            }
+
+            const button =
+                document.getElementById(
+                    "scanButton"
+                );
+
+            button.disabled = true;
+
+            document.getElementById(
+                "message"
+            ).textContent =
+                "Running retailer scan...";
+
+            try {
+                await requestJson(
+                    "/retailers/" +
+                    selectedRetailerId +
+                    "/scan",
+                    {
+                        method: "POST"
+                    }
+                );
+
+                await loadDashboard();
+
+                document.getElementById(
+                    "message"
+                ).textContent =
+                    "Scan completed successfully.";
+            } catch (error) {
+                showError(error);
+            } finally {
+                button.disabled = false;
+            }
+        }
+
+        function showError(error) {
+            const message =
+                document.getElementById(
+                    "message"
+                );
+
+            message.textContent =
+                "Error: " + error.message;
+
+            message.className = "error";
+        }
+
+        async function initialize() {
+            await loadRetailers();
+            await loadDashboard();
+
+            document.getElementById(
+                "message"
+            ).textContent =
+                "Dashboard loaded.";
+        }
+
+        initialize().catch(showError);
+
+        setInterval(
+            () => loadDashboard().catch(showError),
+            15000
+        );
+    </script>
+</body>
+</html>

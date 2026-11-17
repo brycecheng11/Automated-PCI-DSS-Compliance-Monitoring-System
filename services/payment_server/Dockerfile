@@ -2,6 +2,10 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
+RUN pip install --no-cache-dir fastapi==0.115.6 "uvicorn[standard]==0.34.0"
+
+COPY main.py .
+
 EXPOSE 8081
 
-CMD ["python", "-m", "http.server", "8081", "--bind", "0.0.0.0"]
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8081"]

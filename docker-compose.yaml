@@ -1,18 +1,42 @@
 services:
   compliance-api:
-    build: ./services/compliance-api
+    build: ./services/compliance_api
+    environment:
+      DATABASE_URL: postgresql://compliance:compliance_dev@compliance-db:5432/compliance
+      OPA_URL: http://policy-engine:8181
+      PAYMENT_SERVER_URL: http://payment-server:8081
     ports:
       - "8000:8000"
+    depends_on:
+      compliance-db:
+        condition: service_healthy
+      policy-engine:
+        condition: service_started
+
+  scheduler:
+    build: ./services/scheduler
+    environment:
+      API_URL: http://compliance-api:8000
+      INTERVAL_SECONDS: 60
+    depends_on:
+      compliance-api:
+        condition: service_started
 
   dashboard:
     build: ./services/dashboard
     ports:
       - "3000:80"
+    depends_on:
+      compliance-api:
+        condition: service_started
 
   payment-server:
-    build: ./services/payment-server
+    build: ./services/payment_server
     ports:
       - "8081:8081"
+    depends_on:
+      payment-db:
+        condition: service_healthy
 
   web-server:
     image: nginx:1.27-alpine
@@ -25,6 +49,14 @@ services:
       POSTGRES_DB: compliance
       POSTGRES_USER: compliance
       POSTGRES_PASSWORD: compliance_dev
+    volumes:
+      - compliance-db-data:/var/lib/postgresql/data
+      - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U compliance -d compliance"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
   payment-db:
     image: postgres:16-alpine
@@ -32,9 +64,26 @@ services:
       POSTGRES_DB: payments
       POSTGRES_USER: payments
       POSTGRES_PASSWORD: payments_dev
+    volumes:
+      - payment-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U payments -d payments"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
   policy-engine:
     image: openpolicyagent/opa:latest
-    command: ["run", "--server", "--addr=0.0.0.0:8181"]
+    command:
+      - run
+      - --server
+      - --addr=0.0.0.0:8181
+      - /policies
+    volumes:
+      - ./policies:/policies:ro
     ports:
       - "8181:8181"
+
+volumes:
+  compliance-db-data:
+  payment-db-data:
