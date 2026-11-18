@@ -53,20 +53,24 @@ def initialize_payment_database():
         if role_exists is None:
             connection.execute(
                 sql.SQL(
-                    "CREATE ROLE {} LOGIN PASSWORD %s "
+                    "CREATE ROLE {} LOGIN PASSWORD {} "
                     "NOSUPERUSER NOCREATEDB NOCREATEROLE "
                     "NOREPLICATION NOBYPASSRLS"
-                ).format(sql.Identifier(PAYMENT_APP_USER)),
-                (PAYMENT_APP_PASSWORD,)
+                ).format(
+                    sql.Identifier(PAYMENT_APP_USER),
+                    sql.Literal(PAYMENT_APP_PASSWORD)
+                )
             )
         else:
             connection.execute(
                 sql.SQL(
-                    "ALTER ROLE {} LOGIN PASSWORD %s "
+                    "ALTER ROLE {} LOGIN PASSWORD {} "
                     "NOSUPERUSER NOCREATEDB NOCREATEROLE "
                     "NOREPLICATION NOBYPASSRLS"
-                ).format(sql.Identifier(PAYMENT_APP_USER)),
-                (PAYMENT_APP_PASSWORD,)
+                ).format(
+                    sql.Identifier(PAYMENT_APP_USER),
+                    sql.Literal(PAYMENT_APP_PASSWORD)
+                )
             )
 
         connection.execute(
