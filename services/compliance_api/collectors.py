@@ -13,7 +13,8 @@ async def check_scanner(scanner_url, endpoint, asset, timeout=180):
             response.raise_for_status()
 
         payload = response.json()
-        status = payload.get("status", "MANUAL_REVIEW")
+        status = str(payload.get("status", "FAIL")).upper()
+        status = "PASS" if status == "PASS" else "FAIL"
         details = payload.get(
             "reason",
             "The scanner did not return a reason"
@@ -32,7 +33,7 @@ async def check_scanner(scanner_url, endpoint, asset, timeout=180):
 
     except Exception as error:
         return (
-            "MANUAL_REVIEW",
+            "FAIL",
             f"Scanner check could not run: {error}",
             asset,
             {
@@ -145,7 +146,7 @@ async def check_tokenized_payment_data(payment_server_url):
 
     except Exception as error:
         return (
-            "MANUAL_REVIEW",
+            "FAIL",
             f"Payment data check could not run: {error}",
             "payment-server"
         )

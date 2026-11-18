@@ -43,13 +43,6 @@
             box-shadow: 0 2px 8px rgba(16, 42, 67, 0.12);
         }
 
-        .panel {
-            display: grid;
-            grid-template-columns: 1fr 1fr auto;
-            gap: 12px;
-            align-items: end;
-        }
-
         label {
             display: block;
             margin-bottom: 6px;
@@ -95,19 +88,6 @@
             background: #52606d;
         }
 
-        .small-button {
-            padding: 7px 10px;
-            font-size: 13px;
-        }
-
-        .secondary-button {
-            background: #52606d;
-        }
-
-        .secondary-button:hover {
-            background: #364152;
-        }
-
         .status-chip {
             display: inline-block;
             padding: 4px 8px;
@@ -124,16 +104,6 @@
         .status-fail {
             color: #b42318;
             background: #fdecea;
-        }
-
-        .status-manual {
-            color: #8a5a00;
-            background: #fff4ce;
-        }
-
-        .status-live {
-            color: #1769aa;
-            background: #e5f1fb;
         }
 
         .notice {
@@ -174,7 +144,7 @@
 
         .cards {
             display: grid;
-            grid-template-columns: repeat(5, 1fr);
+            grid-template-columns: repeat(4, 1fr);
             gap: 14px;
             margin-top: 20px;
         }
@@ -196,10 +166,6 @@
 
         .fail {
             color: #b42318;
-        }
-
-        .manual {
-            color: #9a6700;
         }
 
         section {
@@ -230,10 +196,6 @@
         }
 
         @media (max-width: 950px) {
-            .panel {
-                grid-template-columns: 1fr;
-            }
-
             .cards {
                 grid-template-columns: repeat(2, 1fr);
             }
@@ -248,38 +210,7 @@
     </header>
 
     <main>
-        <section class="panel">
-            <div>
-                <label for="retailerName">Add retailer</label>
-                <input
-                    id="retailerName"
-                    placeholder="Retailer name">
-            </div>
-
-            <div>
-                <label for="retailerEmail">Administrator email</label>
-                <input
-                    id="retailerEmail"
-                    placeholder="security@example.com">
-            </div>
-
-            <button onclick="addRetailer()">
-                Add Retailer
-            </button>
-        </section>
-
         <div class="toolbar">
-            <div>
-                <label for="retailerSelect">
-                    Selected retailer
-                </label>
-
-                <select
-                    id="retailerSelect"
-                    onchange="selectRetailer()">
-                </select>
-            </div>
-
             <button
                 id="scanButton"
                 onclick="runScan()">
@@ -341,10 +272,6 @@
                 <div class="card-value fail" id="failed">—</div>
             </div>
 
-            <div class="card">
-                <div class="card-label">Manual Review</div>
-                <div class="card-value manual" id="manual">—</div>
-            </div>
         </div>
 
         <section>
@@ -366,21 +293,13 @@
         </section>
 
         <section>
-            <h2>Retailer Environment and Control Sources</h2>
+            <h2>Live Control Status</h2>
 
             <div class="notice">
-                Live controls inspect the running Docker resources. Controls
-                marked as demo or manual use the demonstration posture table.
-                Fix the retailer resource, then run another scan to verify the
-                change.
-            </div>
-
-            <div class="toolbar">
-                <button
-                    class="secondary-button"
-                    onclick="resetEnvironment()">
-                    Reset Demo Problems
-                </button>
+                These seven controls inspect the running retailer resources
+                using Nmap, Docker inspection, payment-data validation, TLS,
+                Trivy, PostgreSQL privilege checks, and OWASP ZAP. Every
+                result is displayed as PASS or FAIL.
             </div>
 
             <table>
@@ -409,7 +328,6 @@
                         <th>Controls</th>
                         <th>Passed</th>
                         <th>Failed</th>
-                        <th>Manual Review</th>
                     </tr>
                 </thead>
 
@@ -448,7 +366,6 @@
                         <th>Score</th>
                         <th>Passed</th>
                         <th>Failed</th>
-                        <th>Manual Review</th>
                     </tr>
                 </thead>
 
@@ -456,29 +373,6 @@
             </table>
         </section>
 
-        <section>
-            <h2>Open Findings</h2>
-
-            <p>
-                Open findings:
-                <strong id="openFindings">—</strong>
-            </p>
-
-            <table>
-                <thead>
-                    <tr>
-                        <th>Control</th>
-                        <th>Asset</th>
-                        <th>Severity</th>
-                        <th>Status</th>
-                        <th>Description</th>
-                        <th>Owner</th>
-                    </tr>
-                </thead>
-
-                <tbody id="findingsTable"></tbody>
-            </table>
-        </section>
     </main>
 
     <script>
@@ -496,18 +390,16 @@
         }
 
         function statusChip(status) {
-            const normalized = String(status ?? "")
+            let normalized = String(status ?? "FAIL")
                 .toUpperCase();
 
-            let className = "status-live";
+            normalized = normalized === "PASS"
+                ? "PASS"
+                : "FAIL";
 
-            if (normalized === "PASS") {
-                className = "status-pass";
-            } else if (normalized === "FAIL") {
-                className = "status-fail";
-            } else if (normalized === "MANUAL_REVIEW") {
-                className = "status-manual";
-            }
+            const className = normalized === "PASS"
+                ? "status-pass"
+                : "status-fail";
 
             return `
                 <span class="status-chip ${className}">
@@ -558,13 +450,7 @@
             const retailers =
                 await requestJson("/retailers");
 
-            const select =
-                document.getElementById("retailerSelect");
-
             if (retailers.length === 0) {
-                select.innerHTML =
-                    "<option>No retailers registered</option>";
-
                 selectedRetailerId = null;
                 return;
             }
@@ -579,16 +465,6 @@
                 selectedRetailerId =
                     retailers[0].retailer_id;
             }
-
-            select.innerHTML = retailers.map(
-                retailer => `
-                    <option value="${retailer.retailer_id}">
-                        ${escapeHtml(retailer.name)}
-                    </option>
-                `
-            ).join("");
-
-            select.value = selectedRetailerId;
         }
 
         async function loadDashboard() {
@@ -601,7 +477,6 @@
             const [
                 summary,
                 requirements,
-                findings,
                 assets,
                 environment,
                 evidence,
@@ -609,7 +484,6 @@
             ] = await Promise.all([
                 requestJson("/summary" + query),
                 requestJson("/requirements" + query),
-                requestJson("/findings" + query),
                 requestJson(
                     "/retailers/" +
                     selectedRetailerId +
@@ -656,13 +530,6 @@
             document.getElementById("failed").textContent =
                 summary.failed;
 
-            document.getElementById("manual").textContent =
-                summary.manual_review;
-
-            document.getElementById(
-                "openFindings"
-            ).textContent = summary.open_findings;
-
             document.getElementById(
                 "reportButton"
             ).href =
@@ -688,25 +555,13 @@
                 "environmentTable"
             ).innerHTML = environment.controls.map(
                 control => {
-                    const action = control.fix_available
-                        ? control.value
-                            ? "Fixed"
-                            : `
-                                <button
-                                    class="small-button"
-                                    onclick="remediate('${escapeHtml(control.control_id)}')">
-                                    Apply demo fix
-                                </button>
-                            `
-                        : "Live check during scan";
-
                     return `
                         <tr>
                             <td>${escapeHtml(control.control_id)}</td>
                             <td>${escapeHtml(control.asset_role)}</td>
                             <td>${statusChip(control.status)}</td>
                             <td>${escapeHtml(control.source)}</td>
-                            <td>${action}</td>
+                            <td>Checked from retailer resources</td>
                         </tr>
                     `;
                 }
@@ -725,9 +580,6 @@
                         </td>
                         <td class="fail">
                             ${requirement.failed}
-                        </td>
-                        <td class="manual">
-                            ${requirement.manual_review}
                         </td>
                     </tr>
                 `
@@ -766,168 +618,15 @@
                             <td>${escapeHtml(scan.score)}%</td>
                             <td class="pass">${escapeHtml(scan.passed)}</td>
                             <td class="fail">${escapeHtml(scan.failed)}</td>
-                            <td class="manual">${escapeHtml(scan.manual_review)}</td>
                         </tr>
                     `
                 ).join("")
                 : `
                     <tr>
-                        <td colspan="7">No scans have been run yet</td>
+                        <td colspan="6">No scans have been run yet</td>
                     </tr>
                 `;
 
-            document.getElementById(
-                "findingsTable"
-            ).innerHTML = findings.length
-                ? findings.map(
-                    finding => `
-                        <tr>
-                            <td>${escapeHtml(finding.control_id)}</td>
-                            <td>${escapeHtml(finding.asset_id)}</td>
-                            <td>${escapeHtml(finding.severity)}</td>
-                            <td>${escapeHtml(finding.status)}</td>
-                            <td>${escapeHtml(finding.description)}</td>
-                            <td>${escapeHtml(finding.owner)}</td>
-                        </tr>
-                    `
-                ).join("")
-                : `
-                    <tr>
-                        <td colspan="6">No open findings</td>
-                    </tr>
-                `;
-        }
-
-        async function addRetailer() {
-            const name =
-                document.getElementById(
-                    "retailerName"
-                ).value.trim();
-
-            const adminEmail =
-                document.getElementById(
-                    "retailerEmail"
-                ).value.trim();
-
-            if (!name || !adminEmail) {
-                showError(
-                    new Error(
-                        "Enter a retailer name and email."
-                    )
-                );
-
-                return;
-            }
-
-            try {
-                const created =
-                    await requestJson(
-                        "/retailers",
-                        {
-                            method: "POST",
-                            headers: {
-                                "Content-Type":
-                                    "application/json"
-                            },
-                            body: JSON.stringify({
-                                name: name,
-                                admin_email: adminEmail
-                            })
-                        }
-                    );
-
-                selectedRetailerId =
-                    created.retailer_id;
-
-                document.getElementById(
-                    "retailerName"
-                ).value = "";
-
-                document.getElementById(
-                    "retailerEmail"
-                ).value = "";
-
-                await loadRetailers();
-                await loadDashboard();
-
-                document.getElementById(
-                    "message"
-                ).textContent =
-                    "Retailer added successfully.";
-            } catch (error) {
-                showError(error);
-            }
-        }
-
-        async function remediate(controlId) {
-            if (!selectedRetailerId) {
-                return;
-            }
-
-            try {
-                await requestJson(
-                    "/retailers/" +
-                    selectedRetailerId +
-                    "/remediate/" +
-                    encodeURIComponent(controlId),
-                    {
-                        method: "POST"
-                    }
-                );
-
-                await loadDashboard();
-
-                document.getElementById(
-                    "message"
-                ).textContent =
-                    "Demo remediation recorded. Run a scan to verify it.";
-            } catch (error) {
-                showError(error);
-            }
-        }
-
-        async function resetEnvironment() {
-            if (!selectedRetailerId) {
-                return;
-            }
-
-            try {
-                await requestJson(
-                    "/retailers/" +
-                    selectedRetailerId +
-                    "/environment/reset",
-                    {
-                        method: "POST"
-                    }
-                );
-
-                await loadDashboard();
-
-                document.getElementById(
-                    "message"
-                ).textContent =
-                    "Demo environment reset. Run a scan to show the failures.";
-            } catch (error) {
-                showError(error);
-            }
-        }
-
-        async function selectRetailer() {
-            selectedRetailerId =
-                document.getElementById(
-                    "retailerSelect"
-                ).value;
-
-            try {
-                await loadDashboard();
-
-                document.getElementById(
-                    "message"
-                ).textContent =
-                    "Retailer loaded.";
-            } catch (error) {
-                showError(error);
-            }
         }
 
         async function runScan() {

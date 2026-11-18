@@ -174,6 +174,12 @@ LIVE_SCANNER_CONTROLS = {
     "PCI-11-TESTING": "owasp-zap",
 }
 
+# The demo is intentionally scoped to controls for which the scanner can
+# collect evidence from the running retailer containers. The remaining PCI
+# controls stay in the seed data for future expansion, but are not assessed or
+# shown by the active demo workflow.
+LIVE_CONTROL_IDS = list(LIVE_SCANNER_CONTROLS)
+
 
 DEMO_ENVIRONMENT_DDL = """
 CREATE TABLE IF NOT EXISTS demo_environment (
@@ -290,48 +296,27 @@ def get_demo_environment(connection, retailer_id):
     ).fetchone()
 
 
-def environment_payload(environment):
+def environment_payload(environment, live_statuses=None):
     controls = []
 
-    for control_id, specification in DEMO_CHECKS.items():
+    live_statuses = live_statuses or {}
+
+    for control_id in LIVE_CONTROL_IDS:
+        specification = DEMO_CHECKS[control_id]
         field = specification["field"]
-        is_live_scanner_control = control_id in LIVE_SCANNER_CONTROLS
-
-        value = (
-            None
-            if field is None or is_live_scanner_control
-            else bool(environment[field])
-        )
-
-        if is_live_scanner_control or field is None:
-            status = "LIVE_CHECK"
-        elif value:
-            status = "PASS"
-        elif specification.get("manual"):
-            status = "MANUAL_REVIEW"
-        else:
-            status = "FAIL"
+        status = live_statuses.get(control_id, "FAIL")
+        status = "PASS" if status == "PASS" else "FAIL"
 
         controls.append(
             {
                 "control_id": control_id,
                 "asset_role": specification["asset"],
                 "field": field,
-                "value": value,
+                "value": status == "PASS",
                 "status": status,
-                "fix_available": (
-                    field is not None
-                    and not is_live_scanner_control
-                ),
+                "fix_available": False,
                 "fix_description": specification["fix"],
-                "source": (
-                    LIVE_SCANNER_CONTROLS[control_id]
-                    if is_live_scanner_control
-                    else specification.get(
-                        "source",
-                        "demo_environment"
-                    )
-                ),
+                "source": LIVE_SCANNER_CONTROLS[control_id],
             }
         )
 
@@ -425,6 +410,31 @@ def latest_scan_id(connection, retailer_id):
     ).fetchone()
 
     return row["scan_id"] if row else None
+
+
+def latest_live_statuses(connection, retailer_id):
+    """Return PASS/FAIL statuses for the latest live-control scan."""
+    scan_id = latest_scan_id(connection, retailer_id)
+
+    if scan_id is None:
+        return {}
+
+    rows = connection.execute(
+        """
+        SELECT control_id, status
+        FROM assessments
+        WHERE scan_id = %s
+          AND control_id = ANY(%s)
+        """,
+        (scan_id, LIVE_CONTROL_IDS),
+    ).fetchall()
+
+    return {
+        row["control_id"]: (
+            "PASS" if row["status"] == "PASS" else "FAIL"
+        )
+        for row in rows
+    }
 
 
 def find_asset(assets, logical_asset):
@@ -605,7 +615,10 @@ def get_retailer_environment(retailer_id: UUID):
             retailer_id
         )
 
-        return environment_payload(environment)
+        return environment_payload(
+            environment,
+            latest_live_statuses(connection, retailer_id),
+        )
 
 
 @app.post("/retailers/{retailer_id}/remediate/{control_id}")
@@ -666,7 +679,10 @@ def remediate_demo_control(retailer_id: UUID, control_id: str):
             "message": "Demo remediation recorded",
             "control_id": control_id,
             "remediation": specification["fix"],
-            "environment": environment_payload(environment),
+            "environment": environment_payload(
+                environment,
+                latest_live_statuses(connection, retailer_id),
+            ),
         }
 
 
@@ -706,7 +722,10 @@ def reset_demo_environment(retailer_id: UUID):
 
         return {
             "message": "Demo environment reset",
-            "environment": environment_payload(environment),
+            "environment": environment_payload(
+                environment,
+                latest_live_statuses(connection, retailer_id),
+            ),
         }
 
 
@@ -747,8 +766,10 @@ def get_controls():
                 test_type,
                 severity_if_failed
             FROM controls
+            WHERE control_id = ANY(%s)
             ORDER BY requirement_number
-            """
+            """,
+            (LIVE_CONTROL_IDS,),
         ).fetchall()
 
 
@@ -784,8 +805,9 @@ def get_requirements(retailer_id: UUID | None = None):
                     WHERE a.status = 'MANUAL_REVIEW'
                 )::int AS manual_review
             FROM requirements r
-            LEFT JOIN controls c
+            JOIN controls c
                 ON c.requirement_number = r.requirement_number
+               AND c.control_id = ANY(%s)
             LEFT JOIN assessments a
                 ON a.control_id = c.control_id
                AND a.scan_id = %s
@@ -795,7 +817,7 @@ def get_requirements(retailer_id: UUID | None = None):
                 r.goal
             ORDER BY r.requirement_number
             """,
-            (scan_id,)
+            (LIVE_CONTROL_IDS, scan_id)
         ).fetchall()
 
 
@@ -832,9 +854,10 @@ def get_findings(retailer_id: UUID | None = None):
             FROM findings
             WHERE scan_id = %s
               AND status = 'OPEN'
+              AND control_id = ANY(%s)
             ORDER BY created_at DESC
             """,
-            (scan_id,)
+            (scan_id, LIVE_CONTROL_IDS)
         ).fetchall()
 
 
@@ -873,9 +896,10 @@ def get_evidence(retailer_id: UUID | None = None):
             JOIN controls c
                 ON c.control_id = e.control_id
             WHERE e.scan_id = %s
+              AND e.control_id = ANY(%s)
             ORDER BY c.requirement_number
             """,
-            (scan_id,)
+            (scan_id, LIVE_CONTROL_IDS)
         ).fetchall()
 
 
@@ -910,6 +934,7 @@ def get_scan_runs(retailer_id: UUID | None = None):
             FROM scan_runs s
             LEFT JOIN assessments a
                 ON a.scan_id = s.scan_id
+               AND a.control_id = ANY(%s)
             WHERE s.retailer_id = %s
             GROUP BY
                 s.scan_id,
@@ -919,7 +944,7 @@ def get_scan_runs(retailer_id: UUID | None = None):
             ORDER BY s.started_at DESC
             LIMIT 10
             """,
-            (selected_retailer_id,)
+            (LIVE_CONTROL_IDS, selected_retailer_id)
         ).fetchall()
 
         for row in rows:
@@ -999,8 +1024,9 @@ def get_summary(retailer_id: UUID | None = None):
                 )::int AS manual_review
             FROM assessments
             WHERE scan_id = %s
+              AND control_id = ANY(%s)
             """,
-            (scan_id,)
+            (scan_id, LIVE_CONTROL_IDS)
         ).fetchone()
 
         open_findings = connection.execute(
@@ -1009,8 +1035,9 @@ def get_summary(retailer_id: UUID | None = None):
             FROM findings
             WHERE scan_id = %s
               AND status = 'OPEN'
+              AND control_id = ANY(%s)
             """,
-            (scan_id,)
+            (scan_id, LIVE_CONTROL_IDS)
         ).fetchone()["count"]
 
     total = summary["total"]
@@ -1075,13 +1102,13 @@ async def run_retailer_scan(retailer_id: UUID):
             (retailer_id,)
         ).fetchall()
 
-        environment = get_demo_environment(
-            connection,
-            retailer_id
-        )
-
         control_rows = connection.execute(
-            "SELECT * FROM controls"
+            """
+            SELECT *
+            FROM controls
+            WHERE control_id = ANY(%s)
+            """,
+            (LIVE_CONTROL_IDS,),
         ).fetchall()
 
         controls = {
@@ -1091,7 +1118,7 @@ async def run_retailer_scan(retailer_id: UUID):
 
         passed_control_ids = []
 
-        for control_id in DEMO_CHECKS:
+        for control_id in LIVE_CONTROL_IDS:
             evidence_metadata = {}
 
             if control_id == "PCI-01-PORTS":
@@ -1161,17 +1188,6 @@ async def run_retailer_scan(retailer_id: UUID):
                 ) = await check_zap(
                     SCANNER_URL
                 )
-            else:
-                (
-                    result,
-                    details,
-                    logical_asset,
-                    evidence_metadata
-                ) = build_demo_evidence(
-                    control_id,
-                    environment
-                )
-
             evidence_metadata.setdefault(
                 "remediation",
                 DEMO_CHECKS[control_id]["fix"]
@@ -1183,7 +1199,7 @@ async def run_retailer_scan(retailer_id: UUID):
             )
 
             if asset is None:
-                result = "MANUAL_REVIEW"
+                result = "FAIL"
                 details = (
                     f"No registered asset matches "
                     f"the expected {logical_asset} role"
@@ -1202,10 +1218,8 @@ async def run_retailer_scan(retailer_id: UUID):
 
             decision = policy_response.get("result", {})
 
-            status = decision.get(
-                "status",
-                "MANUAL_REVIEW"
-            )
+            status = decision.get("status", "FAIL")
+            status = "PASS" if status == "PASS" else "FAIL"
 
             severity = decision.get(
                 "severity",
@@ -1392,9 +1406,10 @@ def generate_report(retailer_id: UUID | None = None):
                 JOIN controls c
                     ON c.control_id = a.control_id
                 WHERE a.scan_id = %s
+                  AND a.control_id = ANY(%s)
                 ORDER BY a.requirement_number
                 """,
-                (scan_id,)
+                (scan_id, LIVE_CONTROL_IDS)
             ).fetchall()
 
     field_names = [
