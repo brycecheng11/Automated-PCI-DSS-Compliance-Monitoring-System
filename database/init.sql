@@ -31,6 +31,25 @@ CREATE TABLE assets (
     status TEXT NOT NULL DEFAULT 'MONITORED'
 );
 
+-- Demo-only representation of the retailer's security posture.
+-- In a production deployment, collectors would read these values from the
+-- retailer's real servers, databases, identity provider, and security tools.
+CREATE TABLE demo_environment (
+    retailer_id UUID PRIMARY KEY REFERENCES retailers(retailer_id) ON DELETE CASCADE,
+    approved_ports BOOLEAN NOT NULL DEFAULT TRUE,
+    secure_configuration BOOLEAN NOT NULL DEFAULT TRUE,
+    tls_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+    malware_protection_current BOOLEAN NOT NULL DEFAULT TRUE,
+    software_patched BOOLEAN NOT NULL DEFAULT FALSE,
+    least_privilege_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    mfa_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+    physical_access_reviewed BOOLEAN NOT NULL DEFAULT FALSE,
+    logging_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+    security_testing_current BOOLEAN NOT NULL DEFAULT TRUE,
+    policy_current BOOLEAN NOT NULL DEFAULT FALSE,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 CREATE TABLE scan_runs (
     scan_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     retailer_id UUID REFERENCES retailers(retailer_id),
@@ -123,6 +142,36 @@ SELECT
     'DemoMart Web Server',
     'Nginx container',
     'Web Team'
+FROM retailers
+WHERE name = 'DemoMart';
+
+INSERT INTO demo_environment (
+    retailer_id,
+    approved_ports,
+    secure_configuration,
+    tls_enabled,
+    malware_protection_current,
+    software_patched,
+    least_privilege_enabled,
+    mfa_enabled,
+    physical_access_reviewed,
+    logging_enabled,
+    security_testing_current,
+    policy_current
+)
+SELECT
+    retailer_id,
+    TRUE,
+    TRUE,
+    FALSE,
+    TRUE,
+    FALSE,
+    TRUE,
+    FALSE,
+    FALSE,
+    FALSE,
+    TRUE,
+    FALSE
 FROM retailers
 WHERE name = 'DemoMart';
 

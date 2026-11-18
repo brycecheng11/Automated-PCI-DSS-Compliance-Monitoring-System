@@ -3,6 +3,64 @@ import re
 import httpx
 
 
+async def check_scanner(scanner_url, endpoint, asset, timeout=180):
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            response = await client.post(
+                scanner_url.rstrip("/") + endpoint,
+                json={"asset": asset},
+            )
+            response.raise_for_status()
+
+        payload = response.json()
+        status = payload.get("status", "MANUAL_REVIEW")
+        details = payload.get(
+            "reason",
+            "The scanner did not return a reason"
+        )
+
+        return (
+            status,
+            details,
+            asset,
+            {
+                "source": payload.get("tool", "scanner"),
+                "scanner_endpoint": endpoint,
+                "scanner_result": payload,
+            },
+        )
+
+    except Exception as error:
+        return (
+            "MANUAL_REVIEW",
+            f"Scanner check could not run: {error}",
+            asset,
+            {
+                "source": "scanner",
+                "scanner_endpoint": endpoint,
+                "error": str(error),
+            },
+        )
+
+
+async def check_nmap(scanner_url):
+    return await check_scanner(
+        scanner_url,
+        "/scan/nmap",
+        "web-server",
+        timeout=60,
+    )
+
+
+async def check_trivy(scanner_url):
+    return await check_scanner(
+        scanner_url,
+        "/scan/trivy",
+        "payment-server",
+        timeout=240,
+    )
+
+
 async def check_tokenized_payment_data(payment_server_url):
     try:
         endpoint = (

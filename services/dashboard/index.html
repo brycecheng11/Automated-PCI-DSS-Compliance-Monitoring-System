@@ -95,6 +95,55 @@
             background: #52606d;
         }
 
+        .small-button {
+            padding: 7px 10px;
+            font-size: 13px;
+        }
+
+        .secondary-button {
+            background: #52606d;
+        }
+
+        .secondary-button:hover {
+            background: #364152;
+        }
+
+        .status-chip {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 999px;
+            font-size: 12px;
+            font-weight: bold;
+        }
+
+        .status-pass {
+            color: #137333;
+            background: #e6f4ea;
+        }
+
+        .status-fail {
+            color: #b42318;
+            background: #fdecea;
+        }
+
+        .status-manual {
+            color: #8a5a00;
+            background: #fff4ce;
+        }
+
+        .status-live {
+            color: #1769aa;
+            background: #e5f1fb;
+        }
+
+        .notice {
+            padding: 12px;
+            border-left: 4px solid #1769aa;
+            background: #eef6fd;
+            color: #334e68;
+            margin-bottom: 14px;
+        }
+
         .toolbar {
             display: flex;
             gap: 12px;
@@ -317,6 +366,39 @@
         </section>
 
         <section>
+            <h2>Demo Retailer Environment</h2>
+
+            <div class="notice">
+                These controls represent the retailer environment for the
+                classroom demonstration. Apply a demo fix, then run another
+                scan to verify the change. In production, these values would
+                come from real servers, identity systems, and security tools.
+            </div>
+
+            <div class="toolbar">
+                <button
+                    class="secondary-button"
+                    onclick="resetEnvironment()">
+                    Reset Demo Problems
+                </button>
+            </div>
+
+            <table>
+                <thead>
+                    <tr>
+                        <th>Control</th>
+                        <th>Asset Role</th>
+                        <th>Current State</th>
+                        <th>Source</th>
+                        <th>Action</th>
+                    </tr>
+                </thead>
+
+                <tbody id="environmentTable"></tbody>
+            </table>
+        </section>
+
+        <section>
             <h2>PCI DSS Requirements</h2>
 
             <table>
@@ -332,6 +414,45 @@
                 </thead>
 
                 <tbody id="requirementsTable"></tbody>
+            </table>
+        </section>
+
+        <section>
+            <h2>Collected Evidence</h2>
+
+            <table>
+                <thead>
+                    <tr>
+                        <th>Requirement</th>
+                        <th>Control</th>
+                        <th>Asset</th>
+                        <th>Result</th>
+                        <th>Evidence Details</th>
+                        <th>Collected</th>
+                    </tr>
+                </thead>
+
+                <tbody id="evidenceTable"></tbody>
+            </table>
+        </section>
+
+        <section>
+            <h2>Scan History</h2>
+
+            <table>
+                <thead>
+                    <tr>
+                        <th>Scan ID</th>
+                        <th>Started</th>
+                        <th>Status</th>
+                        <th>Score</th>
+                        <th>Passed</th>
+                        <th>Failed</th>
+                        <th>Manual Review</th>
+                    </tr>
+                </thead>
+
+                <tbody id="scanHistoryTable"></tbody>
             </table>
         </section>
 
@@ -372,6 +493,39 @@
                 .replaceAll(">", "&gt;")
                 .replaceAll('"', "&quot;")
                 .replaceAll("'", "&#039;");
+        }
+
+        function statusChip(status) {
+            const normalized = String(status ?? "")
+                .toUpperCase();
+
+            let className = "status-live";
+
+            if (normalized === "PASS") {
+                className = "status-pass";
+            } else if (normalized === "FAIL") {
+                className = "status-fail";
+            } else if (normalized === "MANUAL_REVIEW") {
+                className = "status-manual";
+            }
+
+            return `
+                <span class="status-chip ${className}">
+                    ${escapeHtml(normalized)}
+                </span>
+            `;
+        }
+
+        function evidenceText(details) {
+            if (typeof details === "string") {
+                return details;
+            }
+
+            if (details && details.description) {
+                return details.description;
+            }
+
+            return JSON.stringify(details ?? {});
         }
 
         async function requestJson(endpoint, options = {}) {
@@ -444,7 +598,10 @@
                 summary,
                 requirements,
                 findings,
-                assets
+                assets,
+                environment,
+                evidence,
+                scanRuns
             ] = await Promise.all([
                 requestJson("/summary" + query),
                 requestJson("/requirements" + query),
@@ -453,7 +610,14 @@
                     "/retailers/" +
                     selectedRetailerId +
                     "/assets"
-                )
+                ),
+                requestJson(
+                    "/retailers/" +
+                    selectedRetailerId +
+                    "/environment"
+                ),
+                requestJson("/evidence" + query),
+                requestJson("/scan-runs" + query)
             ]);
 
             document.getElementById(
@@ -517,6 +681,34 @@
             ).join("");
 
             document.getElementById(
+                "environmentTable"
+            ).innerHTML = environment.controls.map(
+                control => {
+                    const action = control.fix_available
+                        ? control.value
+                            ? "Fixed"
+                            : `
+                                <button
+                                    class="small-button"
+                                    onclick="remediate('${escapeHtml(control.control_id)}')">
+                                    Apply demo fix
+                                </button>
+                            `
+                        : "Live check during scan";
+
+                    return `
+                        <tr>
+                            <td>${escapeHtml(control.control_id)}</td>
+                            <td>${escapeHtml(control.asset_role)}</td>
+                            <td>${statusChip(control.status)}</td>
+                            <td>${escapeHtml(control.source)}</td>
+                            <td>${action}</td>
+                        </tr>
+                    `;
+                }
+            ).join("");
+
+            document.getElementById(
                 "requirementsTable"
             ).innerHTML = requirements.map(
                 requirement => `
@@ -536,6 +728,49 @@
                     </tr>
                 `
             ).join("");
+
+            document.getElementById(
+                "evidenceTable"
+            ).innerHTML = evidence.length
+                ? evidence.map(
+                    item => `
+                        <tr>
+                            <td>${escapeHtml(item.requirement_number)}</td>
+                            <td>${escapeHtml(item.control_id)}</td>
+                            <td>${escapeHtml(item.asset_id)}</td>
+                            <td>${statusChip(item.result)}</td>
+                            <td>${escapeHtml(evidenceText(item.details))}</td>
+                            <td>${new Date(item.collected_at).toLocaleString()}</td>
+                        </tr>
+                    `
+                ).join("")
+                : `
+                    <tr>
+                        <td colspan="6">No evidence collected yet</td>
+                    </tr>
+                `;
+
+            document.getElementById(
+                "scanHistoryTable"
+            ).innerHTML = scanRuns.length
+                ? scanRuns.map(
+                    scan => `
+                        <tr>
+                            <td>${escapeHtml(String(scan.scan_id).slice(0, 8))}</td>
+                            <td>${new Date(scan.started_at).toLocaleString()}</td>
+                            <td>${escapeHtml(scan.status)}</td>
+                            <td>${escapeHtml(scan.score)}%</td>
+                            <td class="pass">${escapeHtml(scan.passed)}</td>
+                            <td class="fail">${escapeHtml(scan.failed)}</td>
+                            <td class="manual">${escapeHtml(scan.manual_review)}</td>
+                        </tr>
+                    `
+                ).join("")
+                : `
+                    <tr>
+                        <td colspan="7">No scans have been run yet</td>
+                    </tr>
+                `;
 
             document.getElementById(
                 "findingsTable"
@@ -615,6 +850,59 @@
                     "message"
                 ).textContent =
                     "Retailer added successfully.";
+            } catch (error) {
+                showError(error);
+            }
+        }
+
+        async function remediate(controlId) {
+            if (!selectedRetailerId) {
+                return;
+            }
+
+            try {
+                await requestJson(
+                    "/retailers/" +
+                    selectedRetailerId +
+                    "/remediate/" +
+                    encodeURIComponent(controlId),
+                    {
+                        method: "POST"
+                    }
+                );
+
+                await loadDashboard();
+
+                document.getElementById(
+                    "message"
+                ).textContent =
+                    "Demo remediation recorded. Run a scan to verify it.";
+            } catch (error) {
+                showError(error);
+            }
+        }
+
+        async function resetEnvironment() {
+            if (!selectedRetailerId) {
+                return;
+            }
+
+            try {
+                await requestJson(
+                    "/retailers/" +
+                    selectedRetailerId +
+                    "/environment/reset",
+                    {
+                        method: "POST"
+                    }
+                );
+
+                await loadDashboard();
+
+                document.getElementById(
+                    "message"
+                ).textContent =
+                    "Demo environment reset. Run a scan to show the failures.";
             } catch (error) {
                 showError(error);
             }

@@ -37,7 +37,7 @@ def run_scheduled_scans():
 
             scan_response = requests.post(
                 f"{API_URL}/retailers/{retailer_id}/scan",
-                timeout=60
+                timeout=300
             )
 
             scan_response.raise_for_status()

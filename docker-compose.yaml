@@ -1,10 +1,12 @@
 services:
   compliance-api:
     build: ./services/compliance_api
+    image: pci-demo/compliance-api:demo
     environment:
       DATABASE_URL: postgresql://compliance:compliance_dev@compliance-db:5432/compliance
       OPA_URL: http://policy-engine:8181
       PAYMENT_SERVER_URL: http://payment-server:8081
+      SCANNER_URL: http://scanner:9000
     ports:
       - "8000:8000"
     depends_on:
@@ -12,6 +14,8 @@ services:
         condition: service_healthy
       policy-engine:
         condition: service_started
+      scanner:
+        condition: service_healthy
 
   scheduler:
     build: ./services/scheduler
@@ -24,6 +28,7 @@ services:
 
   dashboard:
     build: ./services/dashboard
+    image: pci-demo/dashboard:demo
     ports:
       - "3000:80"
     depends_on:
@@ -32,6 +37,9 @@ services:
 
   payment-server:
     build: ./services/payment_server
+    image: pci-demo/payment-server:demo
+    environment:
+      DATABASE_URL: postgresql://payments:payments_dev@payment-db:5432/payments
     ports:
       - "8081:8081"
     depends_on:
@@ -84,6 +92,30 @@ services:
     ports:
       - "8181:8181"
 
+  scanner:
+    build: ./services/scanner
+    environment:
+      TRIVY_CACHE_DIR: /root/.cache/trivy
+    volumes:
+      # Required for Trivy to inspect locally built Docker images.
+      # This is appropriate for the local demo only; it grants Docker-daemon access.
+      - /var/run/docker.sock:/var/run/docker.sock
+      - trivy-cache:/root/.cache/trivy
+    expose:
+      - "9000"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:9000/health')"
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
 volumes:
   compliance-db-data:
   payment-db-data:
+  trivy-cache:

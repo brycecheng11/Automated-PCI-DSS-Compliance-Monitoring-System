@@ -11,7 +11,11 @@ from fastapi.responses import StreamingResponse
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 from pydantic import BaseModel
-from collectors import check_tokenized_payment_data
+from collectors import (
+    check_nmap,
+    check_tokenized_payment_data,
+    check_trivy,
+)
 
 
 DATABASE_URL = os.getenv(
@@ -27,6 +31,11 @@ OPA_URL = os.getenv(
 PAYMENT_SERVER_URL = os.getenv(
     "PAYMENT_SERVER_URL",
     "http://payment-server:8081"
+)
+
+SCANNER_URL = os.getenv(
+    "SCANNER_URL",
+    "http://scanner:9000"
 )
 
 app = FastAPI(
@@ -60,74 +69,298 @@ class AssetCreate(BaseModel):
     owner: str
 
 
-DEMO_EVIDENCE = {
-    "PCI-01-PORTS": (
-        "PASS",
-        "Only approved HTTPS and internal ports are exposed",
-        "web-server"
-    ),
-    "PCI-02-CONFIG": (
-        "PASS",
-        "No vendor default credentials detected",
-        "web-server"
-    ),
-    "PCI-03-STORAGE": (
-        "PASS",
-        "Only tokenized references are stored; no full PAN",
-        "payment-db"
-    ),
-    "PCI-04-TLS": (
-        "PASS",
-        "TLS is required for public payment traffic",
-        "payment-server"
-    ),
-    "PCI-05-MALWARE": (
-        "PASS",
-        "Malware protection status is current",
-        "payment-server"
-    ),
-    "PCI-06-SOFTWARE": (
-        "FAIL",
-        "Critical dependency patch is overdue",
-        "payment-server"
-    ),
-    "PCI-07-PRIVILEGE": (
-        "PASS",
-        "Service account uses least-privilege database role",
-        "payment-db"
-    ),
-    "PCI-08-MFA": (
-        "FAIL",
-        "MFA is not enabled for one administrator account",
-        "web-server"
-    ),
-    "PCI-09-PHYSICAL": (
-        "MANUAL_REVIEW",
-        "Physical access evidence requires assessor review",
-        "payment-db"
-    ),
-    "PCI-10-LOGS": (
-        "PASS",
-        "Authentication and payment events are centrally retained",
-        "payment-server"
-    ),
-    "PCI-11-TESTING": (
-        "PASS",
-        "Automated vulnerability and security tests completed",
-        "payment-server"
-    ),
-    "PCI-12-POLICY": (
-        "MANUAL_REVIEW",
-        "Annual policy acknowledgement requires confirmation",
-        "web-server"
-    )
+DEMO_CHECKS = {
+    "PCI-01-PORTS": {
+        "field": "approved_ports",
+        "asset": "web-server",
+        "pass": "Only approved HTTPS and internal ports are exposed",
+        "fail": "Unapproved network ports are exposed",
+        "fix": "Restrict the web server to approved ports",
+    },
+    "PCI-02-CONFIG": {
+        "field": "secure_configuration",
+        "asset": "web-server",
+        "pass": "No vendor default credentials detected",
+        "fail": "The secure configuration baseline has not been applied",
+        "fix": "Apply the secure configuration baseline",
+    },
+    "PCI-03-STORAGE": {
+        "field": None,
+        "asset": "payment-server",
+        "pass": "Payment references are tokenized; no full PAN was returned",
+        "fail": "A non-tokenized payment reference was detected",
+        "fix": "Tokenize payment references before storage",
+        "source": "payment-server",
+    },
+    "PCI-04-TLS": {
+        "field": "tls_enabled",
+        "asset": "web-server",
+        "pass": "Public traffic uses strong TLS",
+        "fail": "The retailer web service is not configured for TLS",
+        "fix": "Enable HTTPS and strong TLS on the web service",
+    },
+    "PCI-05-MALWARE": {
+        "field": "malware_protection_current",
+        "asset": "payment-server",
+        "pass": "Malware protection status is current",
+        "fail": "Malware protection is missing or out of date",
+        "fix": "Update and enable malware protection",
+    },
+    "PCI-06-SOFTWARE": {
+        "field": "software_patched",
+        "asset": "payment-server",
+        "pass": "Critical software patches are current",
+        "fail": "A critical dependency patch is overdue",
+        "fix": "Apply the overdue dependency and rebuild the service",
+    },
+    "PCI-07-PRIVILEGE": {
+        "field": "least_privilege_enabled",
+        "asset": "payment-db",
+        "pass": "Service accounts use least-privilege database roles",
+        "fail": "A service account has more access than required",
+        "fix": "Remove unnecessary database privileges",
+    },
+    "PCI-08-MFA": {
+        "field": "mfa_enabled",
+        "asset": "web-server",
+        "pass": "Privileged accounts use MFA",
+        "fail": "MFA is not enabled for one administrator account",
+        "fix": "Enable MFA for privileged accounts",
+    },
+    "PCI-09-PHYSICAL": {
+        "field": "physical_access_reviewed",
+        "asset": "payment-db",
+        "pass": "Physical-access evidence was reviewed",
+        "fail": "Physical-access evidence requires assessor review",
+        "fix": "Upload and approve the physical-access review",
+        "manual": True,
+    },
+    "PCI-10-LOGS": {
+        "field": "logging_enabled",
+        "asset": "payment-server",
+        "pass": "Authentication and payment events are centrally retained",
+        "fail": "Required security logs are not being collected",
+        "fix": "Enable centralized security logging",
+    },
+    "PCI-11-TESTING": {
+        "field": "security_testing_current",
+        "asset": "payment-server",
+        "pass": "Automated vulnerability and security tests are current",
+        "fail": "Required security testing evidence is out of date",
+        "fix": "Run and document the required security tests",
+    },
+    "PCI-12-POLICY": {
+        "field": "policy_current",
+        "asset": "web-server",
+        "pass": "The current security policy was acknowledged",
+        "fail": "Annual policy acknowledgement requires confirmation",
+        "fix": "Review and acknowledge the current security policy",
+        "manual": True,
+    },
 }
+
+
+LIVE_SCANNER_CONTROLS = {
+    "PCI-01-PORTS": "nmap",
+    "PCI-06-SOFTWARE": "trivy",
+}
+
+
+DEMO_ENVIRONMENT_DDL = """
+CREATE TABLE IF NOT EXISTS demo_environment (
+    retailer_id UUID PRIMARY KEY REFERENCES retailers(retailer_id) ON DELETE CASCADE,
+    approved_ports BOOLEAN NOT NULL DEFAULT TRUE,
+    secure_configuration BOOLEAN NOT NULL DEFAULT TRUE,
+    tls_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+    malware_protection_current BOOLEAN NOT NULL DEFAULT TRUE,
+    software_patched BOOLEAN NOT NULL DEFAULT FALSE,
+    least_privilege_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    mfa_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+    physical_access_reviewed BOOLEAN NOT NULL DEFAULT FALSE,
+    logging_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+    security_testing_current BOOLEAN NOT NULL DEFAULT TRUE,
+    policy_current BOOLEAN NOT NULL DEFAULT FALSE,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+)
+"""
 
 
 def connect():
     return psycopg.connect(
         DATABASE_URL,
         row_factory=dict_row
+    )
+
+
+def ensure_demo_environment_table(connection):
+    """Create the demo posture table for clean and existing databases."""
+    connection.execute(DEMO_ENVIRONMENT_DDL)
+    connection.execute(
+        """
+        INSERT INTO demo_environment (retailer_id)
+        SELECT retailer_id
+        FROM retailers
+        ON CONFLICT (retailer_id) DO NOTHING
+        """
+    )
+
+
+def ensure_retailer_environment(connection, retailer_id):
+    ensure_demo_environment_table(connection)
+    connection.execute(
+        """
+        INSERT INTO demo_environment (retailer_id)
+        VALUES (%s)
+        ON CONFLICT (retailer_id) DO NOTHING
+        """,
+        (retailer_id,)
+    )
+
+
+def create_demo_assets(connection, retailer_id, retailer_name):
+    """Give a newly onboarded demo retailer its three monitored assets."""
+    prefix = "".join(
+        character.lower() if character.isalnum() else "-"
+        for character in retailer_name
+    ).strip("-") or "retailer"
+    suffix = str(retailer_id)[:8]
+
+    assets = [
+        (
+            f"{prefix}-{suffix}-web-server",
+            f"{retailer_name} Web Server",
+            "Nginx container",
+            "Web Team"
+        ),
+        (
+            f"{prefix}-{suffix}-payment-server",
+            f"{retailer_name} Payment Server",
+            "Python container",
+            "Payment Team"
+        ),
+        (
+            f"{prefix}-{suffix}-payment-db",
+            f"{retailer_name} Payment Database",
+            "PostgreSQL container",
+            "Database Team"
+        ),
+    ]
+
+    for asset_id, name, asset_type, owner in assets:
+        connection.execute(
+            """
+            INSERT INTO assets (
+                asset_id,
+                retailer_id,
+                name,
+                asset_type,
+                owner
+            )
+            VALUES (%s, %s, %s, %s, %s)
+            ON CONFLICT (asset_id) DO NOTHING
+            """,
+            (
+                asset_id,
+                retailer_id,
+                name,
+                asset_type,
+                owner
+            )
+        )
+
+
+def get_demo_environment(connection, retailer_id):
+    ensure_retailer_environment(connection, retailer_id)
+    return connection.execute(
+        """
+        SELECT *
+        FROM demo_environment
+        WHERE retailer_id = %s
+        """,
+        (retailer_id,)
+    ).fetchone()
+
+
+def environment_payload(environment):
+    controls = []
+
+    for control_id, specification in DEMO_CHECKS.items():
+        field = specification["field"]
+        is_live_scanner_control = control_id in LIVE_SCANNER_CONTROLS
+
+        value = (
+            None
+            if field is None or is_live_scanner_control
+            else bool(environment[field])
+        )
+
+        if is_live_scanner_control or field is None:
+            status = "LIVE_CHECK"
+        elif value:
+            status = "PASS"
+        elif specification.get("manual"):
+            status = "MANUAL_REVIEW"
+        else:
+            status = "FAIL"
+
+        controls.append(
+            {
+                "control_id": control_id,
+                "asset_role": specification["asset"],
+                "field": field,
+                "value": value,
+                "status": status,
+                "fix_available": (
+                    field is not None
+                    and not is_live_scanner_control
+                ),
+                "fix_description": specification["fix"],
+                "source": (
+                    LIVE_SCANNER_CONTROLS[control_id]
+                    if is_live_scanner_control
+                    else specification.get(
+                        "source",
+                        "demo_environment"
+                    )
+                ),
+            }
+        )
+
+    return {
+        "retailer_id": environment["retailer_id"],
+        "updated_at": environment["updated_at"],
+        "controls": controls,
+    }
+
+
+def build_demo_evidence(control_id, environment):
+    """Return a deterministic, explainable demo check result."""
+    specification = DEMO_CHECKS[control_id]
+    field = specification["field"]
+    observed_value = bool(environment[field])
+
+    if observed_value:
+        result = "PASS"
+        details = specification["pass"]
+    elif specification.get("manual"):
+        result = "MANUAL_REVIEW"
+        details = specification["fail"]
+    else:
+        result = "FAIL"
+        details = specification["fail"]
+
+    metadata = {
+        "source": "demo_environment",
+        "field": field,
+        "observed_value": observed_value,
+        "remediation": specification["fix"],
+    }
+
+    return (
+        result,
+        details,
+        specification["asset"],
+        metadata
     )
 
 
@@ -235,6 +468,13 @@ async def evaluate_policy(policy_data):
         )
 
 
+@app.on_event("startup")
+def initialize_demo_environment():
+    """Apply the small demo migration to existing database volumes too."""
+    with connect() as connection:
+        ensure_demo_environment_table(connection)
+
+
 @app.get("/health")
 def health():
     try:
@@ -269,7 +509,7 @@ def get_retailers():
 @app.post("/retailers")
 def create_retailer(retailer: RetailerCreate):
     with connect() as connection:
-        return connection.execute(
+        created = connection.execute(
             """
             INSERT INTO retailers (name, admin_email)
             VALUES (%s, %s)
@@ -277,6 +517,16 @@ def create_retailer(retailer: RetailerCreate):
             """,
             (retailer.name, retailer.admin_email)
         ).fetchone()
+
+        retailer_id = created["retailer_id"]
+        ensure_retailer_environment(connection, retailer_id)
+        create_demo_assets(
+            connection,
+            retailer_id,
+            retailer.name
+        )
+
+        return created
 
 
 @app.get("/retailers/{retailer_id}")
@@ -326,6 +576,120 @@ def create_asset(retailer_id: UUID, asset: AssetCreate):
                 asset.owner
             )
         ).fetchone()
+
+
+@app.get("/retailers/{retailer_id}/environment")
+def get_retailer_environment(retailer_id: UUID):
+    with connect() as connection:
+        require_retailer(connection, retailer_id)
+        environment = get_demo_environment(
+            connection,
+            retailer_id
+        )
+
+        return environment_payload(environment)
+
+
+@app.post("/retailers/{retailer_id}/remediate/{control_id}")
+def remediate_demo_control(retailer_id: UUID, control_id: str):
+    specification = DEMO_CHECKS.get(control_id)
+
+    if specification is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Control does not exist"
+        )
+
+    if control_id in LIVE_SCANNER_CONTROLS:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"{control_id} is checked by "
+                f"{LIVE_SCANNER_CONTROLS[control_id]}. "
+                "Fix the retailer environment and run another scan."
+            )
+        )
+
+    field = specification["field"]
+
+    if field is None:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "This control is checked by a live collector and "
+                "must be fixed in the retailer environment"
+            )
+        )
+
+    with connect() as connection:
+        require_retailer(connection, retailer_id)
+        ensure_retailer_environment(
+            connection,
+            retailer_id
+        )
+
+        # field comes only from the fixed DEMO_CHECKS mapping above.
+        connection.execute(
+            f"""
+            UPDATE demo_environment
+            SET "{field}" = TRUE,
+                updated_at = now()
+            WHERE retailer_id = %s
+            """,
+            (retailer_id,)
+        )
+
+        environment = get_demo_environment(
+            connection,
+            retailer_id
+        )
+
+        return {
+            "message": "Demo remediation recorded",
+            "control_id": control_id,
+            "remediation": specification["fix"],
+            "environment": environment_payload(environment),
+        }
+
+
+@app.post("/retailers/{retailer_id}/environment/reset")
+def reset_demo_environment(retailer_id: UUID):
+    with connect() as connection:
+        require_retailer(connection, retailer_id)
+        ensure_retailer_environment(
+            connection,
+            retailer_id
+        )
+
+        connection.execute(
+            """
+            UPDATE demo_environment
+            SET approved_ports = TRUE,
+                secure_configuration = TRUE,
+                tls_enabled = FALSE,
+                malware_protection_current = TRUE,
+                software_patched = FALSE,
+                least_privilege_enabled = TRUE,
+                mfa_enabled = FALSE,
+                physical_access_reviewed = FALSE,
+                logging_enabled = FALSE,
+                security_testing_current = TRUE,
+                policy_current = FALSE,
+                updated_at = now()
+            WHERE retailer_id = %s
+            """,
+            (retailer_id,)
+        )
+
+        environment = get_demo_environment(
+            connection,
+            retailer_id
+        )
+
+        return {
+            "message": "Demo environment reset",
+            "environment": environment_payload(environment),
+        }
 
 
 @app.get("/assets")
@@ -454,6 +818,102 @@ def get_findings(retailer_id: UUID | None = None):
             """,
             (scan_id,)
         ).fetchall()
+
+
+@app.get("/evidence")
+def get_evidence(retailer_id: UUID | None = None):
+    """Return the evidence collected by the latest completed scan."""
+    with connect() as connection:
+        selected_retailer_id = (
+            retailer_id
+            if retailer_id is not None
+            else get_default_retailer_id(connection)
+        )
+
+        require_retailer(connection, selected_retailer_id)
+        scan_id = latest_scan_id(
+            connection,
+            selected_retailer_id
+        )
+
+        if scan_id is None:
+            return []
+
+        return connection.execute(
+            """
+            SELECT
+                e.id,
+                e.scan_id,
+                e.control_id,
+                c.requirement_number,
+                c.title AS control_title,
+                e.asset_id,
+                e.result,
+                e.details,
+                e.collected_at
+            FROM evidence e
+            JOIN controls c
+                ON c.control_id = e.control_id
+            WHERE e.scan_id = %s
+            ORDER BY c.requirement_number
+            """,
+            (scan_id,)
+        ).fetchall()
+
+
+@app.get("/scan-runs")
+def get_scan_runs(retailer_id: UUID | None = None):
+    """Return recent scan history so remediation can be demonstrated."""
+    with connect() as connection:
+        selected_retailer_id = (
+            retailer_id
+            if retailer_id is not None
+            else get_default_retailer_id(connection)
+        )
+
+        require_retailer(connection, selected_retailer_id)
+        rows = connection.execute(
+            """
+            SELECT
+                s.scan_id,
+                s.status,
+                s.started_at,
+                s.completed_at,
+                COUNT(a.id)::int AS total,
+                COUNT(a.id) FILTER (
+                    WHERE a.status = 'PASS'
+                )::int AS passed,
+                COUNT(a.id) FILTER (
+                    WHERE a.status = 'FAIL'
+                )::int AS failed,
+                COUNT(a.id) FILTER (
+                    WHERE a.status = 'MANUAL_REVIEW'
+                )::int AS manual_review
+            FROM scan_runs s
+            LEFT JOIN assessments a
+                ON a.scan_id = s.scan_id
+            WHERE s.retailer_id = %s
+            GROUP BY
+                s.scan_id,
+                s.status,
+                s.started_at,
+                s.completed_at
+            ORDER BY s.started_at DESC
+            LIMIT 10
+            """,
+            (selected_retailer_id,)
+        ).fetchall()
+
+        for row in rows:
+            total = row["total"]
+            row["score"] = (
+                round((row["passed"] / total) * 100, 1)
+                if total > 0
+                else 0
+            )
+
+        return rows
+
 
 @app.get("/summary")
 def get_summary(retailer_id: UUID | None = None):
@@ -597,6 +1057,11 @@ async def run_retailer_scan(retailer_id: UUID):
             (retailer_id,)
         ).fetchall()
 
+        environment = get_demo_environment(
+            connection,
+            retailer_id
+        )
+
         control_rows = connection.execute(
             "SELECT * FROM controls"
         ).fetchall()
@@ -606,16 +1071,51 @@ async def run_retailer_scan(retailer_id: UUID):
             for row in control_rows
         }
 
-        for control_id, evidence in DEMO_EVIDENCE.items():
-            result, details, logical_asset = evidence
+        passed_control_ids = []
 
-            if control_id == "PCI-03-STORAGE":
+        for control_id in DEMO_CHECKS:
+            evidence_metadata = {}
+
+            if control_id == "PCI-01-PORTS":
+                (
+                    result,
+                    details,
+                    logical_asset,
+                    evidence_metadata
+                ) = await check_nmap(
+                    SCANNER_URL
+                )
+            elif control_id == "PCI-03-STORAGE":
                 (
                     result,
                     details,
                     logical_asset
                 ) = await check_tokenized_payment_data(
                     PAYMENT_SERVER_URL
+                )
+                evidence_metadata = {
+                    "source": "payment-server",
+                    "endpoint": "/transactions/demo",
+                    "check": "tokenized card references",
+                }
+            elif control_id == "PCI-06-SOFTWARE":
+                (
+                    result,
+                    details,
+                    logical_asset,
+                    evidence_metadata
+                ) = await check_trivy(
+                    SCANNER_URL
+                )
+            else:
+                (
+                    result,
+                    details,
+                    logical_asset,
+                    evidence_metadata
+                ) = build_demo_evidence(
+                    control_id,
+                    environment
                 )
 
             asset = find_asset(
@@ -679,9 +1179,11 @@ async def run_retailer_scan(retailer_id: UUID):
                     scan_id,
                     asset_id,
                     control_id,
-                    status,
+                    result,
                     Jsonb({
-                        "description": details
+                        "description": details,
+                        **evidence_metadata,
+                        "policy_status": status,
                     })
                 )
             )
@@ -734,6 +1236,8 @@ async def run_retailer_scan(retailer_id: UUID):
                         "Security Team"
                     )
                 )
+            else:
+                passed_control_ids.append(control_id)
 
             decisions.append(
                 {
@@ -741,6 +1245,27 @@ async def run_retailer_scan(retailer_id: UUID):
                     "status": status,
                     "severity": severity
                 }
+            )
+
+        # A control is only considered remediated after a later scan passes.
+        # Keep the old finding for audit history, but mark it resolved.
+        for control_id in passed_control_ids:
+            connection.execute(
+                """
+                UPDATE findings AS f
+                SET status = 'RESOLVED'
+                FROM scan_runs AS previous_scan
+                WHERE f.scan_id = previous_scan.scan_id
+                  AND previous_scan.retailer_id = %s
+                  AND f.control_id = %s
+                  AND f.status = 'OPEN'
+                  AND f.scan_id <> %s
+                """,
+                (
+                    retailer_id,
+                    control_id,
+                    scan_id
+                )
             )
 
         connection.execute(
