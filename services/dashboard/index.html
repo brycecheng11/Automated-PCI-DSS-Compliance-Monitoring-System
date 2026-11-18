@@ -366,13 +366,13 @@
         </section>
 
         <section>
-            <h2>Demo Retailer Environment</h2>
+            <h2>Retailer Environment and Control Sources</h2>
 
             <div class="notice">
-                These controls represent the retailer environment for the
-                classroom demonstration. Apply a demo fix, then run another
-                scan to verify the change. In production, these values would
-                come from real servers, identity systems, and security tools.
+                Live controls inspect the running Docker resources. Controls
+                marked as demo or manual use the demonstration posture table.
+                Fix the retailer resource, then run another scan to verify the
+                change.
             </div>
 
             <div class="toolbar">
@@ -522,7 +522,11 @@
             }
 
             if (details && details.description) {
-                return details.description;
+                const remediation = details.remediation
+                    ? " Recommendation: " + details.remediation
+                    : "";
+
+                return details.description + remediation;
             }
 
             return JSON.stringify(details ?? {});

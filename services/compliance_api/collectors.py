@@ -52,12 +52,48 @@ async def check_nmap(scanner_url):
     )
 
 
+async def check_config(scanner_url):
+    return await check_scanner(
+        scanner_url,
+        "/scan/config",
+        "web-server",
+        timeout=60,
+    )
+
+
+async def check_tls(scanner_url):
+    return await check_scanner(
+        scanner_url,
+        "/scan/tls",
+        "web-server",
+        timeout=30,
+    )
+
+
 async def check_trivy(scanner_url):
     return await check_scanner(
         scanner_url,
         "/scan/trivy",
         "payment-server",
         timeout=240,
+    )
+
+
+async def check_database_privileges(scanner_url):
+    return await check_scanner(
+        scanner_url,
+        "/scan/db-privileges",
+        "payment-db",
+        timeout=30,
+    )
+
+
+async def check_zap(scanner_url):
+    return await check_scanner(
+        scanner_url,
+        "/scan/zap",
+        "web-server",
+        timeout=210,
     )
 
 

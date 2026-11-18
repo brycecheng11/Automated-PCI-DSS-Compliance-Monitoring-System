@@ -3,26 +3,72 @@ import os
 import psycopg
 from fastapi import FastAPI, HTTPException
 from psycopg.rows import dict_row
+from psycopg import sql
 
 
 DATABASE_URL = os.getenv(
     "DATABASE_URL",
+    "postgresql://payment_app:payment_app_dev@payment-db:5432/payments"
+)
+
+ADMIN_DATABASE_URL = os.getenv(
+    "ADMIN_DATABASE_URL",
     "postgresql://payments:payments_dev@payment-db:5432/payments"
+)
+
+PAYMENT_APP_USER = os.getenv(
+    "PAYMENT_APP_USER",
+    "payment_app"
+)
+
+PAYMENT_APP_PASSWORD = os.getenv(
+    "PAYMENT_APP_PASSWORD",
+    "payment_app_dev"
 )
 
 
 app = FastAPI(title="Demo Payment Server")
 
 
-def connect():
+def connect(database_url=DATABASE_URL):
     return psycopg.connect(
-        DATABASE_URL,
+        database_url,
         row_factory=dict_row
     )
 
 
 def initialize_payment_database():
-    with connect() as connection:
+    # Use the bootstrap account only for one-time demo schema setup. The
+    # payment API itself connects with the restricted payment_app role.
+    with connect(ADMIN_DATABASE_URL) as connection:
+        role_exists = connection.execute(
+            """
+            SELECT 1
+            FROM pg_roles
+            WHERE rolname = %s
+            """,
+            (PAYMENT_APP_USER,)
+        ).fetchone()
+
+        if role_exists is None:
+            connection.execute(
+                sql.SQL(
+                    "CREATE ROLE {} LOGIN PASSWORD %s "
+                    "NOSUPERUSER NOCREATEDB NOCREATEROLE "
+                    "NOREPLICATION NOBYPASSRLS"
+                ).format(sql.Identifier(PAYMENT_APP_USER)),
+                (PAYMENT_APP_PASSWORD,)
+            )
+        else:
+            connection.execute(
+                sql.SQL(
+                    "ALTER ROLE {} LOGIN PASSWORD %s "
+                    "NOSUPERUSER NOCREATEDB NOCREATEROLE "
+                    "NOREPLICATION NOBYPASSRLS"
+                ).format(sql.Identifier(PAYMENT_APP_USER)),
+                (PAYMENT_APP_PASSWORD,)
+            )
+
         connection.execute(
             """
             CREATE TABLE IF NOT EXISTS demo_transactions (
@@ -49,6 +95,18 @@ def initialize_payment_database():
                 ('txn-1002', 12.50, 'USD', 'tok_demo_002', 'approved')
             ON CONFLICT (id) DO NOTHING
             """
+        )
+
+        connection.execute("REVOKE ALL ON TABLE demo_transactions FROM PUBLIC")
+        connection.execute(
+            sql.SQL("GRANT USAGE ON SCHEMA public TO {}").format(
+                sql.Identifier(PAYMENT_APP_USER)
+            )
+        )
+        connection.execute(
+            sql.SQL("GRANT SELECT ON TABLE demo_transactions TO {}").format(
+                sql.Identifier(PAYMENT_APP_USER)
+            )
         )
 
 

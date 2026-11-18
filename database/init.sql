@@ -107,17 +107,17 @@ INSERT INTO requirements VALUES
 (12, 'Support information security with organizational policies', 'Information-security policy');
 
 INSERT INTO controls VALUES
-('PCI-01-PORTS', 1, 'Only approved network ports are exposed', 'AUTOMATED', 'HIGH'),
-('PCI-02-CONFIG', 2, 'Secure configuration baseline passes', 'AUTOMATED', 'HIGH'),
-('PCI-03-STORAGE', 3, 'Stored account data is protected', 'AUTOMATED', 'CRITICAL'),
-('PCI-04-TLS', 4, 'Transmission uses strong TLS', 'AUTOMATED', 'HIGH'),
+('PCI-01-PORTS', 1, 'Only approved network ports are exposed', 'LIVE', 'HIGH'),
+('PCI-02-CONFIG', 2, 'Secure configuration baseline passes', 'LIVE', 'HIGH'),
+('PCI-03-STORAGE', 3, 'Stored account data is protected', 'LIVE', 'CRITICAL'),
+('PCI-04-TLS', 4, 'Transmission uses strong TLS', 'LIVE', 'HIGH'),
 ('PCI-05-MALWARE', 5, 'Malware protection is current', 'AUTOMATED', 'HIGH'),
-('PCI-06-SOFTWARE', 6, 'No critical software vulnerabilities remain', 'AUTOMATED', 'CRITICAL'),
-('PCI-07-PRIVILEGE', 7, 'Access follows least privilege', 'AUTOMATED', 'HIGH'),
+('PCI-06-SOFTWARE', 6, 'No critical software vulnerabilities remain', 'LIVE', 'CRITICAL'),
+('PCI-07-PRIVILEGE', 7, 'Access follows least privilege', 'LIVE', 'HIGH'),
 ('PCI-08-MFA', 8, 'Privileged accounts use MFA', 'AUTOMATED', 'HIGH'),
 ('PCI-09-PHYSICAL', 9, 'Physical-access review is current', 'MANUAL', 'MEDIUM'),
 ('PCI-10-LOGS', 10, 'Security logs are collected', 'AUTOMATED', 'HIGH'),
-('PCI-11-TESTING', 11, 'Security testing is documented', 'AUTOMATED', 'HIGH'),
+('PCI-11-TESTING', 11, 'Security testing is documented', 'LIVE', 'HIGH'),
 ('PCI-12-POLICY', 12, 'Security policies are current', 'MANUAL', 'MEDIUM');
 
 INSERT INTO retailers (

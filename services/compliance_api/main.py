@@ -12,9 +12,13 @@ from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 from pydantic import BaseModel
 from collectors import (
+    check_config,
+    check_database_privileges,
     check_nmap,
     check_tokenized_payment_data,
+    check_tls,
     check_trivy,
+    check_zap,
 )
 
 
@@ -162,7 +166,12 @@ DEMO_CHECKS = {
 
 LIVE_SCANNER_CONTROLS = {
     "PCI-01-PORTS": "nmap",
+    "PCI-02-CONFIG": "docker-inspect",
+    "PCI-03-STORAGE": "payment-server",
+    "PCI-04-TLS": "python-ssl",
     "PCI-06-SOFTWARE": "trivy",
+    "PCI-07-PRIVILEGE": "postgresql",
+    "PCI-11-TESTING": "owasp-zap",
 }
 
 
@@ -473,6 +482,15 @@ def initialize_demo_environment():
     """Apply the small demo migration to existing database volumes too."""
     with connect() as connection:
         ensure_demo_environment_table(connection)
+        for control_id in LIVE_SCANNER_CONTROLS:
+            connection.execute(
+                """
+                UPDATE controls
+                SET test_type = 'LIVE'
+                WHERE control_id = %s
+                """,
+                (control_id,)
+            )
 
 
 @app.get("/health")
@@ -1085,6 +1103,15 @@ async def run_retailer_scan(retailer_id: UUID):
                 ) = await check_nmap(
                     SCANNER_URL
                 )
+            elif control_id == "PCI-02-CONFIG":
+                (
+                    result,
+                    details,
+                    logical_asset,
+                    evidence_metadata
+                ) = await check_config(
+                    SCANNER_URL
+                )
             elif control_id == "PCI-03-STORAGE":
                 (
                     result,
@@ -1098,6 +1125,15 @@ async def run_retailer_scan(retailer_id: UUID):
                     "endpoint": "/transactions/demo",
                     "check": "tokenized card references",
                 }
+            elif control_id == "PCI-04-TLS":
+                (
+                    result,
+                    details,
+                    logical_asset,
+                    evidence_metadata
+                ) = await check_tls(
+                    SCANNER_URL
+                )
             elif control_id == "PCI-06-SOFTWARE":
                 (
                     result,
@@ -1105,6 +1141,24 @@ async def run_retailer_scan(retailer_id: UUID):
                     logical_asset,
                     evidence_metadata
                 ) = await check_trivy(
+                    SCANNER_URL
+                )
+            elif control_id == "PCI-07-PRIVILEGE":
+                (
+                    result,
+                    details,
+                    logical_asset,
+                    evidence_metadata
+                ) = await check_database_privileges(
+                    SCANNER_URL
+                )
+            elif control_id == "PCI-11-TESTING":
+                (
+                    result,
+                    details,
+                    logical_asset,
+                    evidence_metadata
+                ) = await check_zap(
                     SCANNER_URL
                 )
             else:
@@ -1117,6 +1171,11 @@ async def run_retailer_scan(retailer_id: UUID):
                     control_id,
                     environment
                 )
+
+            evidence_metadata.setdefault(
+                "remediation",
+                DEMO_CHECKS[control_id]["fix"]
+            )
 
             asset = find_asset(
                 retailer_assets,

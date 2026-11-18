@@ -39,7 +39,10 @@ services:
     build: ./services/payment_server
     image: pci-demo/payment-server:demo
     environment:
-      DATABASE_URL: postgresql://payments:payments_dev@payment-db:5432/payments
+      DATABASE_URL: postgresql://payment_app:payment_app_dev@payment-db:5432/payments
+      ADMIN_DATABASE_URL: postgresql://payments:payments_dev@payment-db:5432/payments
+      PAYMENT_APP_USER: payment_app
+      PAYMENT_APP_PASSWORD: payment_app_dev
     ports:
       - "8081:8081"
     depends_on:
@@ -47,9 +50,11 @@ services:
         condition: service_healthy
 
   web-server:
-    image: nginx:1.27-alpine
+    build: ./services/web_server
+    image: pci-demo/web-server:demo
     ports:
       - "8080:80"
+      - "8443:443"
 
   compliance-db:
     image: postgres:16-alpine
@@ -74,6 +79,7 @@ services:
       POSTGRES_PASSWORD: payments_dev
     volumes:
       - payment-db-data:/var/lib/postgresql/data
+      - ./database/payment_init.sql:/docker-entrypoint-initdb.d/01-payment-init.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U payments -d payments"]
       interval: 5s
@@ -96,6 +102,9 @@ services:
     build: ./services/scanner
     environment:
       TRIVY_CACHE_DIR: /root/.cache/trivy
+      PAYMENT_DATABASE_URL: postgresql://payments:payments_dev@payment-db:5432/payments
+      PAYMENT_APP_ROLE: payment_app
+      ZAP_URL: http://zap:8090
     volumes:
       # Required for Trivy to inspect locally built Docker images.
       # This is appropriate for the local demo only; it grants Docker-daemon access.
@@ -103,6 +112,13 @@ services:
       - trivy-cache:/root/.cache/trivy
     expose:
       - "9000"
+    depends_on:
+      payment-db:
+        condition: service_healthy
+      web-server:
+        condition: service_started
+      zap:
+        condition: service_started
     healthcheck:
       test:
         [
@@ -114,6 +130,29 @@ services:
       interval: 10s
       timeout: 5s
       retries: 12
+
+  zap:
+    image: ghcr.io/zaproxy/zaproxy:stable
+    environment:
+      ZAP_PORT: 8090
+    command:
+      - zap.sh
+      - -daemon
+      - -host
+      - 0.0.0.0
+      - -port
+      - "8090"
+      - -config
+      - api.disablekey=true
+      - -config
+      - api.addrs.addr.name=.*
+      - -config
+      - api.addrs.addr.regex=true
+    expose:
+      - "8090"
+    depends_on:
+      web-server:
+        condition: service_started
 
 volumes:
   compliance-db-data:
